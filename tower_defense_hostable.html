@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <title>Tower Defense – Web</title>
+  <style>
+    :root{--bg:#2b2b2b;--ui:#1e1e1e;--txt:#f5f5f5;--accent:#ffd400;--danger:#ff4d4d}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    .wrap{display:flex;flex-direction:column;gap:.5rem;padding:.6rem;max-width:1000px;margin:0 auto}
+    canvas{width:100%;height:auto;background:#3a3a3a;border-radius:12px;display:block;touch-action:none}
+    .hud{display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap}
+    .stats{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+    .pill{background:var(--ui);padding:.35rem .6rem;border-radius:999px;font-weight:700}
+    .controls{display:grid;grid-template-columns:repeat(6,1fr);gap:.4rem}
+    button{background:var(--ui);border:1px solid #444;color:var(--txt);padding:.6rem .5rem;border-radius:8px;font-weight:700}
+    .tower-btn{display:flex;flex-direction:column;gap:.2rem;align-items:center;justify-content:center;font-size:.9rem}
+    .tower-swatch{width:24px;height:24px;border-radius:6px}
+    .selected{outline:2px solid var(--accent)}
+    .row{display:flex;gap:.5rem}
+    .grow{flex:1}
+    .hint{font-size:.86rem;opacity:.95}
+    .footer{opacity:.7;font-size:.82rem;text-align:center;margin-top:.4rem}
+    .editor{background:#242424;padding:.6rem;border-radius:8px;border:1px solid #333}
+    input[type=number]{width:5rem;padding:.3rem;border-radius:6px;border:1px solid #444;background:#1b1b1b;color:var(--txt)}
+    label{font-size:.9rem}
+    .small{font-size:.85rem;opacity:.9}
+    @media(min-width:800px){.controls{grid-template-columns:repeat(8,1fr)}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hud">
+      <div class="stats">
+        <span class="pill">Vague: <span id="wave">0</span></span>
+        <span class="pill">PV: <span id="lives">100</span></span>
+        <span class="pill">Argent: <span id="money">50</span></span>
+        <span class="pill">Tours: <span id="tcount">0</span>/30</span>
+        <span class="pill">FPS: <span id="fps">0</span></span>
+      </div>
+      <div class="row">
+        <button id="pause">Pause</button>
+        <button id="speed">Vitesse x1</button>
+        <button id="start">Lancer vague</button>
+      </div>
+    </div>
+
+    <canvas id="game" width="640" height="444" aria-label="Jeu Tower Defense"></canvas>
+
+    <div class="controls" aria-hidden="false">
+      <div class="tower-btn selected" data-type="0"><div class="tower-swatch" style="background:#ffff00"></div>Soldat<br><small>25</small></div>
+      <div class="tower-btn" data-type="1"><div class="tower-swatch" style="background:#ff00ff"></div>Sniper<br><small>75</small></div>
+      <div class="tower-btn" data-type="2"><div class="tower-swatch" style="background:#00ffff"></div>Lance<br><small>125</small></div>
+      <div class="tower-btn" data-type="3"><div class="tower-swatch" style="background:#ffffff"></div>Mini<br><small>450</small></div>
+      <div class="tower-btn" data-type="4"><div class="tower-swatch" style="background:#000000"></div>Anihi<br><small>2500</small></div>
+      <button id="editorBtn">Éditeur de vagues</button>
+      <button id="upgrade" class="grow">Améliorer</button>
+      <button id="sell">Vendre</button>
+      <button id="help">Aide</button>
+    </div>
+
+    <div class="editor small" id="editor" style="display:none">
+      <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+        <label>Lent: <input id="e0" type="number" min="0" value="0"></label>
+        <label>Boss: <input id="e1" type="number" min="0" value="0"></label>
+        <label>Normal: <input id="e2" type="number" min="0" value="0"></label>
+        <label>Rapide: <input id="e3" type="number" min="0" value="0"></label>
+        <label>Niveau: <input id="lvl" type="number" min="0" value="0"></label>
+        <button id="saveWave">Sauvegarder</button>
+        <button id="useWave">Utiliser</button>
+        <select id="presets"></select>
+      </div>
+      <div class="small" style="margin-top:.5rem">Crée une configuration, clique "Sauvegarder", puis "Utiliser" pour démarrer cette vague.</div>
+    </div>
+
+    <div class="hint" id="hint">Astuce : touchez la carte pour poser une tour (pas sur la route). Toucher une tour pour la sélectionner.</div>
+    <div class="footer">Jeu local • Pour héberger en ligne → GitHub Pages (instructions après le fichier)</div>
+  </div>
+
+<script>
+/* ======= Variables et données (repris du script) ======= */
+const W=640,H=444,SCALE=2,GRID=10*SCALE;
+const pathRects = [[0,42,100,10],[90,52,10,80],[10,122,80,10],[10,132,10,60],[10,192,140,10],[150,62,10,140],[160,62,120,10],[280,62,10,120],[290,172,30,10]].map(r=>r.map((v,i)=> i<4? v*SCALE:v));
+const turns = [[92,2],[172,0],[252,2],[322,3],[462,1],[592,3],[722,2],[832,3]].map(([p,d])=>[p*SCALE,d]);
+const T = [
+  [[50,2,25,2],[100,3,25,2],[200,3,17,2.25],[400,3,17,2.5],[800,5,17,2.5],[1600,10,15,2.5],[3200,12,12,2.5]],
+  [[150,10,150,3],[300,20,150,3],[600,50,150,4],[1200,100,150,4],[2400,100,75,5],[4800,150,75,5],[9600,150,65,5]],
+  [[250,1,5,1.5],[500,2,5,1.5],[1000,2,3,1.5],[2000,3,3,1.5],[4000,3,3,1.75],[8000,4,3,2],[16000,5,3,2]],
+  [[900,2,10,1.5],[1800,3,10,1.5],[3600,3,7,2.5],[7200,4,7,2.5],[14400,5,7,3],[28800,6,7,3],[47600,6,7,3.5]],
+  [[5000,1e100,1000,5],[10000,1e100,950,5.1],[20000,1e100,900,5.2],[40000,1e100,800,5.5],[80000,1e100,700,5.75],[160000,1e100,600,6],[320000,1e100,500,6]]
+];
+const E = [[10,0.5,3],[50,0.5,15],[5,1,1],[3,2,2]];
+
+let money=50,lives=100,wave=0,ready=false,running=true,alive=0;
+let towers=[],enemies=[],selectedTowerType=0,selectedTowerId=-1;
+let speed=1,paused=false;
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const ui = {wave:document.getElementById('wave'),lives:document.getElementById('lives'),money:document.getElementById('money'),tcount:document.getElementById('tcount'),fps:document.getElementById('fps')};
+const startBtn=document.getElementById('start'),pauseBtn=document.getElementById('pause'),speedBtn=document.getElementById('speed');
+const upgradeBtn=document.getElementById('upgrade'),sellBtn=document.getElementById('sell'),helpBtn=document.getElementById('help');
+const editorBtn=document.getElementById('editorBtn'),editor=document.getElementById('editor');
+const hint=document.getElementById('hint');
+const presets = document.getElementById('presets'), e0=document.getElementById('e0'), e1=document.getElementById('e1'), e2=document.getElementById('e2'), e3=document.getElementById('e3'), lvlInput=document.getElementById('lvl');
+const saveWaveBtn=document.getElementById('saveWave'), useWaveBtn=document.getElementById('useWave');
+
+/* ======= Son simple ======= */
+const AudioCtx = window.AudioContext ? new AudioContext() : null;
+function beep(freq=880,dur=0.06,vol=0.1){
+  if(!AudioCtx) return;
+  const t=AudioCtx.currentTime;
+  const o=AudioCtx.createOscillator(), g=AudioCtx.createGain();
+  o.type='sine'; o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(vol,t);
+  o.connect(g); g.connect(AudioCtx.destination);
+  o.start(t); o.stop(t+dur);
+}
+
+/* ======= Utilitaires ======= */
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function dist(ax,ay,bx,by){const dx=ax-bx,dy=ay-by;return Math.hypot(dx,dy);}
+function isOnRoad(x,y){ for(const [px,py,pw,ph] of pathRects){ if(x < px+pw && x+GRID > px && y < py+ph && y+GRID > py) return true;} return false; }
+function onUIChange(){ ui.money.textContent = money >= 1e50 ? '∞' : Math.floor(money); ui.lives.textContent = lives; ui.wave.textContent = wave; ui.tcount.textContent = towers.length; }
+
+/* ======= Classe Enemy & Tower ======= */
+class Enemy {
+  constructor(type,lvl,offset){ this.type=type; this.hpMax=Math.floor(E[type][0]*(1+2.5*lvl)); this.hp=this.hpMax; this.v=E[type][1]*SCALE; this.reward=Math.floor(E[type][2]*2*(lvl+1)); this.tr=-10*offset*SCALE; this.dir=3; this.x=0-10*offset*SCALE; this.y=44*SCALE; this.hitTimer=0; }
+  update(){
+    for(const [p,d] of turns){ if(Math.round(this.tr)===p) this.dir=d; }
+    const dv=this.v;
+    if(this.dir===1||this.dir===2) this.y += this.dir===1 ? -dv : dv;
+    else this.x += this.dir===0 ? -dv : dv;
+    this.tr += this.v;
+    if(this.x >= W+2){ lives -= this.hp; this.hp = 0; alive = Math.max(0, alive-1); return false; }
+    return this.hp > 0;
+  }
+  draw(){ ctx.fillStyle = this.hitTimer>0 ? '#ff0000' : ['#009600','#555555','#9ad79a','#00a0ff'][this.type]; ctx.fillRect(this.x,this.y,6*SCALE,6*SCALE);
+    ctx.fillStyle='#00000080'; ctx.fillRect(this.x,this.y-3,6*SCALE,2); const w=clamp(Math.floor((this.hp/this.hpMax)*(6*SCALE)),0,6*SCALE); ctx.fillStyle='#00ff00'; ctx.fillRect(this.x,this.y-3,w,2); if(this.hitTimer>0) this.hitTimer--; }
+}
+
+class Tower {
+  constructor(x,y,type){ this.x=x; this.y=y; this.type=type; this.lvl=0; this.stats=T[type][this.lvl]; this.cd=0; }
+  canUpgrade(){ return this.lvl < 6 && typeof T[this.type][this.lvl+1][0] === 'number'; }
+  costToUpgrade(){ return this.canUpgrade() ? T[this.type][this.lvl][0] : Infinity; }
+  upgrade(){ if(!this.canUpgrade()) return false; const cost=this.costToUpgrade(); if(money>=cost){ money-=cost; this.lvl++; this.stats=T[this.type][this.lvl]; beep(1200,0.06,0.08); return true;} return false; }
+  sell(){ const val=Math.floor(3*Math.pow((this.lvl+1)*(this.type+1),2.5)); money+=val; beep(400,0.06,0.08); }
+  update(enemies){
+    if(this.cd>0){ this.cd -= 1*speed; return; }
+    const [cost,dmg,delay,rangeTiles] = this.stats; const range = rangeTiles*10*SCALE;
+    let best=null, bestTr=-Infinity;
+    for(const e of enemies){ const d=dist(this.x,this.y,e.x+3*SCALE,e.y+3*SCALE); if(e.hp>0 && d<=range && e.tr>bestTr){ best=e; bestTr=e.tr; } }
+    if(best){ best.hp -= dmg; best.hitTimer = 3; if(best.hp<=0){ money += best.reward; alive = Math.max(0, alive-1); beep(200,0.04,0.08); } this.cd = delay; beep(1000,0.02,0.02); }
+  }
+  draw(selected=false){ if(selected){ ctx.fillStyle='rgba(255,212,0,0.18)'; ctx.beginPath(); ctx.arc(this.x,this.y,this.stats[3]*10*SCALE,0,Math.PI*2); ctx.fill(); }
+    ctx.fillStyle = ['#ffff00','#ff00ff','#00ffff','#ffffff','#000000'][this.type]; const s=6*SCALE; ctx.fillRect(this.x-s/2,this.y-s/2,s,s); if(selected){ ctx.strokeStyle='#ffd400'; ctx.lineWidth=2; ctx.strokeRect(this.x-s/2-2,this.y-s/2-2,s+4,s+4); } }
+}
+
+/* ======= Vagues (Remplir) ======= */
+function spawnWave(custom=null){
+  ready=true; enemies=[]; alive=0;
+  const lvl=Math.floor(wave/20); const wav=wave-20*lvl;
+  let counts;
+  if(custom) counts=custom;
+  else{
+    if(wav===0) counts=[0,0,2,0];
+    else if(wav===1) counts=[0,0,0,2];
+    else if(wav===2) counts=[2,0,0,0];
+    else counts=[ Math.floor(wav/4 + Math.floor(lvl/3)), Math.floor(wav/10 + Math.floor(wave/50)), Math.floor(wav/2 + lvl/3), Math.floor(wav/2 -1 + lvl/3) ];
+  }
+  let offset=0; counts.forEach((n,type)=>{ for(let i=0;i<n;i++){ enemies.push(new Enemy(type,lvl,++offset)); alive++; } });
+  beep(880,0.08,0.08);
+}
+
+/* ======= Entrées tactiles & souris ======= */
+function worldFromEvent(e){
+  const rect = canvas.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const x = (clientX - rect.left) * (canvas.width / rect.width);
+  const y = (clientY - rect.top) * (canvas.height / rect.height);
+  const gx = Math.floor(x / GRID) * GRID; const gy = Math.floor(y / GRID) * GRID;
+  return {x: gx + GRID/2, y: gy + GRID/2, cellX: gx, cellY: gy};
+}
+canvas.addEventListener('touchstart', e=>{ e.preventDefault(); handleTap(worldFromEvent(e)); });
+canvas.addEventListener('mousedown', e=>{ handleTap(worldFromEvent(e)); });
+
+function handleTap(p){
+  selectedTowerId = towers.findIndex(t => dist(t.x,t.y,p.x,p.y) < GRID/2);
+  if(selectedTowerId !== -1){ const t=towers[selectedTowerId]; hint.textContent = `Tour ${['Soldat','Sniper','Lance','Minigun','Anihil.'][t.type]} niv ${t.lvl} — Dmg ${t.stats[1]}, Cd ${t.stats[2]}, Portée ${t.stats[3]}`; return; }
+  if(towers.length >= 30){ showHint("Limite de 30 tours atteinte."); return; }
+  if(isOnRoad(p.cellX,p.cellY)){ showHint("Impossible sur la route."); return; }
+  const costs = [25,75,150,450,2500]; const cost = costs[selectedTowerType];
+  if(money < cost){ showHint("Pas assez d'argent."); return; }
+  money -= cost; towers.push(new Tower(p.cellX + GRID/2, p.cellY + GRID/2, selectedTowerType)); onUIChange(); beep(1200,0.04,0.06);
+}
+
+/* ======= UI boutons ======= */
+document.querySelectorAll('.tower-btn').forEach(btn=>{ btn.addEventListener('click', ()=>{ document.querySelectorAll('.tower-btn').forEach(b=>b.classList.remove('selected')); btn.classList.add('selected'); selectedTowerType = +btn.dataset.type; }); });
+startBtn.addEventListener('click', ()=>{ if(!ready){ spawnWave(); } });
+pauseBtn.addEventListener('click', ()=>{ paused = !paused; pauseBtn.textContent = paused ? 'Reprendre' : 'Pause'; });
+speedBtn.addEventListener('click', ()=>{ speed = speed===1 ? 2 : 1; speedBtn.textContent = speed===1 ? 'Vitesse x1' : 'Vitesse x2'; });
+upgradeBtn.addEventListener('click', ()=>{ if(selectedTowerId===-1){ showHint("Touchez d'abord une tour."); return; } const t=towers[selectedTowerId]; if(!t.canUpgrade()){ showHint("Amélioration max."); return; } if(money < t.costToUpgrade()){ showHint("Pas assez d'argent."); return; } t.upgrade(); onUIChange(); saveState(); });
+sellBtn.addEventListener('click', ()=>{ if(selectedTowerId===-1){ showHint("Touchez d'abord une tour."); return; } towers[selectedTowerId].sell(); towers.splice(selectedTowerId,1); selectedTowerId=-1; onUIChange(); saveState(); });
+helpBtn.addEventListener('click', ()=>{ alert("Contrôles:\n• Touchez la carte pour poser une tour\n• Sélectionnez un type\n• Touchez une tour pour la sélectionner, puis Améliorer ou Vendre\n• Lancer la vague\n• Editeur: customise les quantités d'ennemis") });
+
+editorBtn.addEventListener('click', ()=>{ editor.style.display = editor.style.display === 'none' ? 'block' : 'none'; loadPresets(); });
+
+saveWaveBtn.addEventListener('click', ()=>{
+  const preset = {e0:+e0.value||0,e1:+e1.value||0,e2:+e2.value||0,e3:+e3.value||0,lvl:+lvlInput.value||0};
+  const list = JSON.parse(localStorage.getItem('td_presets')||'[]'); list.push(preset); localStorage.setItem('td_presets', JSON.stringify(list)); loadPresets(); showHint('Preset sauvegardé');
+});
+useWaveBtn.addEventListener('click', ()=>{
+  const preset = JSON.parse(localStorage.getItem('td_presets')||'[]')[presets.selectedIndex]; if(!preset){ showHint('Choisis un preset'); return; }
+  spawnWave([preset.e0,preset.e1,preset.e2,preset.e3]); showHint('Vague personnalisée lancée'); saveState();
+});
+
+function loadPresets(){
+  const list = JSON.parse(localStorage.getItem('td_presets')||'[]'); presets.innerHTML=''; list.forEach((p,i)=>{ const opt = document.createElement('option'); opt.value=i; opt.textContent = `Preset ${i+1} — [${p.e0},${p.e1},${p.e2},${p.e3}] lvl ${p.lvl}`; presets.appendChild(opt); });
+  if(list.length===0){ const opt=document.createElement('option'); opt.textContent='(aucun preset)'; presets.appendChild(opt); }
+}
+
+/* ======= Boucle de jeu ======= */
+let lastTime=performance.now(), frames=0, fps=0, fpsTimer=0;
+function loop(t){
+  if(paused){ requestAnimationFrame(loop); return; }
+  const dt = (t - lastTime); lastTime = t;
+  frames++; fpsTimer += dt;
+  if(fpsTimer >= 1000){ fps = frames; frames=0; fpsTimer=0; ui.fps.textContent = fps; }
+  for(let s=0;s<speed;s++){
+    if(ready){
+      for(const tw of towers) tw.update(enemies);
+      enemies = enemies.filter(e=>e.update());
+      enemies = enemies.filter(e=>e.hp>0);
+      if(alive===0 && ready){ ready=false; wave++; money += 5*wave; onUIChange(); saveState(); showHint('Vague terminée'); }
+    }
+  }
+  draw();
+  if(lives<=0){ running=false; ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0,0,W,H); ctx.fillStyle='#fff'; ctx.font='bold 28px sans-serif'; ctx.fillText('Défaite !',W/2-60,H/2); ctx.font='16px sans-serif'; ctx.fillText('Recharger la page pour recommencer.',W/2-160,H/2+30); return; }
+  requestAnimationFrame(loop);
+}
+
+function draw(){
+  ctx.fillStyle='#3a3a3a'; ctx.fillRect(0,0,W,H);
+  for(const [x,y,w,h] of pathRects){ ctx.fillStyle='#ffcc73'; ctx.fillRect(x,y,w,h); }
+  towers.forEach((t,i)=> t.draw(i===selectedTowerId));
+  enemies.forEach(e=>e.draw());
+  ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(0,21*SCALE,W,1);
+  onUIChange();
+}
+
+/* ======= Sauvegarde automatique (localStorage) ======= */
+function saveState(){ try{ const state={money,lives,wave,towers: towers.map(t=>({x:t.x,y:t.y,type:t.type,lvl:t.lvl})),presets: JSON.parse(localStorage.getItem('td_presets')||'[]')}; localStorage.setItem('td_autosave', JSON.stringify(state)); }catch(e){console.warn(e);} }
+function loadState(){ try{ const state = JSON.parse(localStorage.getItem('td_autosave')||'null'); if(!state) return; money=state.money||50; lives=state.lives||100; wave=state.wave||0; towers = (state.towers||[]).map(o=>{ const t=new Tower(o.x,o.y,o.type); t.lvl=o.lvl; t.stats=T[o.type][t.lvl]; return t; }); localStorage.setItem('td_presets', JSON.stringify(state.presets||[])); }catch(e){console.warn(e);} }
+loadState(); loadPresets(); onUIChange(); requestAnimationFrame(loop);
+
+/* ======= Aide et affichage ======= */
+function showHint(text){ hint.textContent = text; setTimeout(()=>{ if(hint.textContent===text) hint.textContent = 'Astuce : touchez la carte pour poser une tour (pas sur la route).'; },3000); saveState(); }
+
+/* ======= Export / Hébergement simple (instructions affichées) ======= */
+// Nothing to run here — file saved by the generator script on the server side if used.
+
+</script>
+</body>
+</html>
